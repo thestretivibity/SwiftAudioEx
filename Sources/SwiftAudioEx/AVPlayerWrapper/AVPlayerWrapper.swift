@@ -53,7 +53,7 @@ class AVPlayerWrapper: AVPlayerWrapperProtocol {
        }
    }
     // MARK: - Properties
-    
+    public var preloadedAssets = [String: AVAsset]();
     fileprivate var avPlayer = AVPlayer()
     private let playerObserver = AVPlayerObserver()
     internal let playerTimeObserver: AVPlayerTimeObserver
