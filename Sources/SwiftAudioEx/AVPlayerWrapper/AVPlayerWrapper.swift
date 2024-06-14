@@ -21,6 +21,37 @@ public enum PlaybackEndedReason: String {
 }
 
 class AVPlayerWrapper: AVPlayerWrapperProtocol {
+
+        func cancelPreload(item: AudioItem) {
+        let url = item.getSourceUrl();
+        self.preloadedAssets[url]?.cancelLoading();
+        self.preloadedAssets[url] = nil;
+    }
+    
+   func preload(item: AudioItem) {
+       let urlString = item.getSourceUrl()
+       guard let url = URL(string: urlString) else { return }
+       
+       let asset = AVURLAsset(url: url)
+       let keys = ["playable", "tracks", "duration"]
+       
+       asset.loadValuesAsynchronously(forKeys: keys) {
+           var error: NSError? = nil
+           
+           for key in keys {
+               let status = asset.statusOfValue(forKey: key, error: &error)
+               if status == .failed {
+                   return
+               }
+           }
+           
+           DispatchQueue.main.async {
+               if self.preloadedAssets[urlString] == nil {
+                   self.preloadedAssets[urlString] = asset
+               }
+           }
+       }
+   }
     // MARK: - Properties
     
     fileprivate var avPlayer = AVPlayer()
@@ -226,96 +257,103 @@ class AVPlayerWrapper: AVPlayerWrapperProtocol {
         self.playbackError = error
         self.delegate?.AVWrapper(failedWithError: error)
     }
+
+
+       private func setupPlayerItem(with asset: AVAsset) {
+       let item = AVPlayerItem(asset: asset)
+       self.item = item
+       item.preferredForwardBufferDuration = self.bufferDuration
+       self.avPlayer.replaceCurrentItem(with: item)
+       self.startObservingAVPlayer(item: item)
+       self.applyAVPlayerRate()
+       
+       if let initialTime = self.timeToSeekToAfterLoading {
+           self.timeToSeekToAfterLoading = nil
+           self.seek(to: initialTime)
+       }
+   }
     
-    func load() {
-        if (state == .failed) {
-            recreateAVPlayer()
-        } else {
-            clearCurrentItem()
-        }
-        if let url = url {
-            let pendingAsset = AVURLAsset(url: url, options: urlOptions)
-            asset = pendingAsset
-            state = .loading
-            
-            // Load metadata keys asynchronously and separate from playable, to allow that to execute as quickly as it can
-            let metdataKeys = ["commonMetadata", "availableChapterLocales", "availableMetadataFormats"]
-            pendingAsset.loadValuesAsynchronously(forKeys: metdataKeys, completionHandler: { [weak self] in
-                guard let self = self else { return }
-                if (pendingAsset != self.asset) { return; }
-                
-                let commonData = pendingAsset.commonMetadata
-                if (!commonData.isEmpty) {
-                    self.delegate?.AVWrapper(didReceiveCommonMetadata: commonData)
-                }
-                
-                if pendingAsset.availableChapterLocales.count > 0 {
-                    for locale in pendingAsset.availableChapterLocales {
-                        let chapters = pendingAsset.chapterMetadataGroups(withTitleLocale: locale, containingItemsWithCommonKeys: nil)
-                        self.delegate?.AVWrapper(didReceiveChapterMetadata: chapters)
-                    }
-                } else {
-                    for format in pendingAsset.availableMetadataFormats {
-                        let timeRange = CMTimeRange(start: CMTime(seconds: 0, preferredTimescale: 1000), end: pendingAsset.duration)
-                        let group = AVTimedMetadataGroup(items: pendingAsset.metadata(forFormat: format), timeRange: timeRange)
-                        self.delegate?.AVWrapper(didReceiveTimedMetadata: [group])
-                    }
-                }
-            })
-            
-            // Load playable portion of the track and commence when ready
-            let playableKeys = ["playable"]
-            pendingAsset.loadValuesAsynchronously(forKeys: playableKeys, completionHandler: { [weak self] in
-                guard let self = self else { return }
-                
-                DispatchQueue.main.async {
-                    if (pendingAsset != self.asset) { return; }
-                    
-                    for key in playableKeys {
-                        var error: NSError?
-                        let keyStatus = pendingAsset.statusOfValue(forKey: key, error: &error)
-                        switch keyStatus {
-                        case .failed:
-                            self.playbackFailed(error: AudioPlayerError.PlaybackError.failedToLoadKeyValue)
-                            return
-                        case .cancelled, .loading, .unknown:
-                            return
-                        case .loaded:
-                            break
-                        default: break
-                        }
-                    }
-                    
-                    if (!pendingAsset.isPlayable) {
-                        self.playbackFailed(error: AudioPlayerError.PlaybackError.itemWasUnplayable)
-                        return;
-                    }
-                    
-                    let item = AVPlayerItem(
-                        asset: pendingAsset,
-                        automaticallyLoadedAssetKeys: playableKeys
-                    )
-                    self.item = item;
-                    item.preferredForwardBufferDuration = self.bufferDuration
-                    self.avPlayer.replaceCurrentItem(with: item)
-                    self.startObservingAVPlayer(item: item)
-                    self.applyAVPlayerRate()
-                    
-                    if let initialTime = self.timeToSeekToAfterLoading {
-                        self.timeToSeekToAfterLoading = nil
-                        self.seek(to: initialTime)
-                    }
-                }
-            })
-        }
-    }
+     func load() {
+       if state == .failed {
+           recreateAVPlayer()
+       } else {
+           clearCurrentItem()
+       }
+       if let url = url {
+           let pendingAsset = AVURLAsset(url: url, options: urlOptions)
+           asset = pendingAsset
+           state = .loading
+           
+           let metadataKeys = ["commonMetadata", "availableChapterLocales", "availableMetadataFormats"]
+           pendingAsset.loadValuesAsynchronously(forKeys: metadataKeys) { [weak self] in
+               guard let self = self else { return }
+               if pendingAsset != self.asset { return }
+               
+               let commonData = pendingAsset.commonMetadata
+               if !commonData.isEmpty {
+                   self.delegate?.AVWrapper(didReceiveCommonMetadata: commonData)
+               }
+               
+               if pendingAsset.availableChapterLocales.count > 0 {
+                   for locale in pendingAsset.availableChapterLocales {
+                       let chapters = pendingAsset.chapterMetadataGroups(withTitleLocale: locale, containingItemsWithCommonKeys: nil)
+                       self.delegate?.AVWrapper(didReceiveChapterMetadata: chapters)
+                   }
+               } else {
+                   for format in pendingAsset.availableMetadataFormats {
+                       let timeRange = CMTimeRange(start: CMTime(seconds: 0, preferredTimescale: 1000), end: pendingAsset.duration)
+                       let group = AVTimedMetadataGroup(items: pendingAsset.metadata(forFormat: format), timeRange: timeRange)
+                       self.delegate?.AVWrapper(didReceiveTimedMetadata: [group])
+                   }
+               }
+           }
+           
+           let playableKeys = ["playable"]
+           pendingAsset.loadValuesAsynchronously(forKeys: playableKeys) { [weak self] in
+               guard let self = self else { return }
+               
+               DispatchQueue.main.async {
+                   if pendingAsset != self.asset { return }
+                   
+                   for key in playableKeys {
+                       var error: NSError?
+                       let keyStatus = pendingAsset.statusOfValue(forKey: key, error: &error)
+                       switch keyStatus {
+                       case .failed:
+                           self.playbackFailed(error: AudioPlayerError.PlaybackError.failedToLoadKeyValue)
+                           return
+                       case .cancelled, .loading, .unknown:
+                           return
+                       case .loaded:
+                           break
+                       default: break
+                       }
+                   }
+                   
+                   if !pendingAsset.isPlayable {
+                       self.playbackFailed(error: AudioPlayerError.PlaybackError.itemWasUnplayable)
+                       return
+                   }
+                   
+                   self.setupPlayerItem(with: pendingAsset)
+               }
+           }
+       }
+   }
     
-    func load(from url: URL, playWhenReady: Bool, options: [String: Any]? = nil) {
-        self.playWhenReady = playWhenReady
-        self.url = url
-        self.urlOptions = options
-        self.load()
-    }
+     func load(from url: URL, playWhenReady: Bool, options: [String: Any]? = nil) {
+       self.playWhenReady = playWhenReady
+       self.url = url
+       self.urlOptions = options
+       
+       let urlString = url.absoluteString
+       if let preloadedAsset = preloadedAssets[urlString] {
+           asset = preloadedAsset
+           setupPlayerItem(with: preloadedAsset)
+       } else {
+           load()
+       }
+   }
     
     func load(
         from url: URL,

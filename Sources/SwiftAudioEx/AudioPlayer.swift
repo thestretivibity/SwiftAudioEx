@@ -223,6 +223,14 @@ public class AudioPlayer: AVPlayerWrapperDelegate {
         }
     }
 
+    public func preload(item: AudioItem) {
+        self.wrapper.preload(item: item);
+    }
+    
+    public func cancelPreload(item: AudioItem) {
+        self.wrapper.cancelPreload(item: item);
+    }
+
     /**
      Toggle playback status.
      */
