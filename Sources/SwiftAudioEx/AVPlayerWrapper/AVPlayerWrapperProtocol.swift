@@ -68,4 +68,7 @@ protocol AVPlayerWrapperProtocol: AnyObject {
     func unload()
     
     func reload(startFromCurrentTime: Bool)
+    
+    func getAVPlayer() -> AVPlayer
+    
 }

@@ -21,6 +21,10 @@ public enum PlaybackEndedReason: String {
 }
 
 class AVPlayerWrapper: AVPlayerWrapperProtocol {
+    func getAVPlayer() -> AVPlayer {
+           return avPlayer
+       }
+    
 
         func cancelPreload(item: AudioItem) {
         let url = item.getSourceUrl();

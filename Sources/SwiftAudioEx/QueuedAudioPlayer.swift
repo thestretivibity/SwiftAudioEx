@@ -16,9 +16,97 @@ public class QueuedAudioPlayer: AudioPlayer, QueueManagerDelegate {
     fileprivate var lastIndex: Int = -1
     fileprivate var lastItem: AudioItem? = nil
 
+    // Add a property to store the time observer
+    private var timeObserverToken: Any?
+    // Add a flag to track whether the next function has been called
+    private var hasCalledNext = false
+    // Define the threshold for starting the volume decay
+    private let volumeDecayThreshold: TimeInterval = 0.4 // 400 ms
+    // Define the duration for the fade-in effect
+    private let fadeInDuration: TimeInterval = 0.35 // 350 ms
+    // Define the number of steps for the fade effect
+    private let fadeSteps = 20 // Adjust this value as needed
+
     public override init(nowPlayingInfoController: NowPlayingInfoControllerProtocol = NowPlayingInfoController(), remoteCommandController: RemoteCommandController = RemoteCommandController()) {
         super.init(nowPlayingInfoController: nowPlayingInfoController, remoteCommandController: remoteCommandController)
         queue.delegate = self
+        addPeriodicTimeObserver()
+    }
+
+    deinit {
+        if let timeObserverToken = timeObserverToken {
+            wrapper.getAVPlayer().removeTimeObserver(timeObserverToken)
+        }
+    }
+
+    private func addPeriodicTimeObserver() {
+        let interval = CMTime(seconds: 0.01, preferredTimescale: CMTimeScale(NSEC_PER_SEC))
+        timeObserverToken = wrapper.getAVPlayer().addPeriodicTimeObserver(forInterval: interval, queue: .main) { [weak self] time in
+            self?.checkForTrackEnd(time: time)
+        }
+    }
+
+    private func checkForTrackEnd(time: CMTime) {
+        guard let currentItem = wrapper.getAVPlayer().currentItem else { return }
+        let currentTime = CMTimeGetSeconds(time)
+        let duration = CMTimeGetSeconds(currentItem.duration)
+        let remainingTime = duration - currentTime
+
+        // Check if the remaining time is less than or equal to the volume decay threshold
+        if remainingTime <= volumeDecayThreshold && !hasCalledNext {
+            // Ensure there's a next track available in the queue
+            if !queue.nextItems.isEmpty {
+                hasCalledNext = true
+                applyQuadraticVolumeDecay()
+            } else {
+                // No more items in the queue, set the state to ended
+                wrapper.state = .ended
+            }
+        }
+    }
+
+    private func applyQuadraticVolumeDecay() {
+        let initialVolume = wrapper.getAVPlayer().volume
+        let decayDuration = volumeDecayThreshold
+        let decayStepDuration = decayDuration / Double(fadeSteps)
+
+        for step in 0..<fadeSteps {
+            let delay = decayStepDuration * Double(step)
+            let volume = initialVolume * pow(Float(1.0 - Double(step) / Double(fadeSteps)), 2)
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
+                guard let self = self else { return }
+                self.wrapper.getAVPlayer().volume = Float(volume)
+                
+                // Load the next item when the fade-out is halfway through
+                if step == fadeSteps / 2 {
+                    self.loadNextItem()
+                }
+            }
+        }
+    }
+
+    private func loadNextItem() {
+        if let nextItem = queue.next(wrap: repeatMode == .queue) {
+            super.load(item: nextItem)
+            applyQuadraticFadeIn()
+            hasCalledNext = false // Reset the flag
+        }
+    }
+
+    private func applyQuadraticFadeIn() {
+        let fadeInSteps = 20
+        let fadeInStepDuration = fadeInDuration / Double(fadeInSteps)
+        let initialVolume: Float = 0.0
+        wrapper.getAVPlayer().volume = initialVolume
+
+        for step in 0..<fadeInSteps {
+            let delay = fadeInStepDuration * Double(step)
+            let volume = pow(Double(step) / Double(fadeInSteps), 2)
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
+                guard let self = self else { return }
+                self.wrapper.getAVPlayer().volume = Float(volume)
+            }
+        }
     }
 
     /// The repeat mode for the queue player.
@@ -185,22 +273,23 @@ public class QueuedAudioPlayer: AudioPlayer, QueueManagerDelegate {
     }
 
     // MARK: - AVPlayerWrapperDelegate
-
     override func AVWrapperItemDidPlayToEndTime() {
-        event.playbackEnd.emit(data: .playedUntilEnd)
-        if (repeatMode == .track) {
-            self.pause()
-
-            // quick workaround for race condition - schedule a call after 2 frames
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.016 * 2) { [weak self] in self?.replay() }
-        } else if (repeatMode == .queue) {
-            _ = queue.next(wrap: true)
-        } else if (currentIndex != items.count - 1) {
-            _ = queue.next(wrap: false)
-        } else {
-            wrapper.state = .ended
-        }
-    }
+           event.playbackEnd.emit(data: .playedUntilEnd)
+           
+           if repeatMode == .track {
+               self.pause()
+               DispatchQueue.main.asyncAfter(deadline: .now() + 0.016 * 2) { [weak self] in self?.replay() }
+           } else {
+               let nextItem = queue.next(wrap: repeatMode == .queue)
+               if let nextItem = nextItem {
+                   super.load(item: nextItem)
+                   applyQuadraticFadeIn()
+                   hasCalledNext = false // Reset the flag
+               } else {
+                   wrapper.state = .ended
+               }
+           }
+       }
 
     // MARK: - QueueManagerDelegate
 
@@ -233,11 +322,13 @@ public class QueuedAudioPlayer: AudioPlayer, QueueManagerDelegate {
     func onReceivedFirstItem() {
         try! queue.jump(to: 0)
     }
-       public func preloadNext() {
+
+public func preloadNext(numberOfTracks: Int = 1) {
     let nextItems = queue.nextItems
 
-    if nextItems.count > 0 {
-        self.preload(item: nextItems[0])
+    for i in 0..<min(numberOfTracks, nextItems.count) {
+        self.preload(item: nextItems[i])
     }
 }
+
 }
