@@ -21,11 +21,11 @@ public class QueuedAudioPlayer: AudioPlayer, QueueManagerDelegate {
     // Add a flag to track whether the next function has been called
     private var hasCalledNext = false
     // Define the threshold for starting the volume decay
-    private let volumeDecayThreshold: TimeInterval = 0.4 // 400 ms
+    private let volumeDecayThreshold: TimeInterval = 0.2 // 400 ms
     // Define the duration for the fade-in effect
-    private let fadeInDuration: TimeInterval = 0.35 // 350 ms
+    private let fadeInDuration: TimeInterval = 0.1 // 350 ms
     // Define the number of steps for the fade effect
-    private let fadeSteps = 20 // Adjust this value as needed
+    private let fadeSteps = 5 // Adjust this value as needed
 
     public override init(nowPlayingInfoController: NowPlayingInfoControllerProtocol = NowPlayingInfoController(), remoteCommandController: RemoteCommandController = RemoteCommandController()) {
         super.init(nowPlayingInfoController: nowPlayingInfoController, remoteCommandController: remoteCommandController)
@@ -52,12 +52,12 @@ public class QueuedAudioPlayer: AudioPlayer, QueueManagerDelegate {
         let duration = CMTimeGetSeconds(currentItem.duration)
         let remainingTime = duration - currentTime
 
-        // Check if the remaining time is less than or equal to the volume decay threshold
-        if remainingTime <= volumeDecayThreshold && !hasCalledNext {
+        // Check if the remaining time is less than or equal to 300 milliseconds
+        if remainingTime <= 0.1 && !hasCalledNext {
             // Ensure there's a next track available in the queue
             if !queue.nextItems.isEmpty {
                 hasCalledNext = true
-                applyQuadraticVolumeDecay()
+                loadNextItem()
             } else {
                 // No more items in the queue, set the state to ended
                 wrapper.state = .ended
@@ -88,7 +88,8 @@ public class QueuedAudioPlayer: AudioPlayer, QueueManagerDelegate {
     private func loadNextItem() {
         if let nextItem = queue.next(wrap: repeatMode == .queue) {
             super.load(item: nextItem)
-            applyQuadraticFadeIn()
+            play()
+            //applyQuadraticFadeIn()
             hasCalledNext = false // Reset the flag
         }
     }
@@ -274,22 +275,25 @@ public class QueuedAudioPlayer: AudioPlayer, QueueManagerDelegate {
 
     // MARK: - AVPlayerWrapperDelegate
     override func AVWrapperItemDidPlayToEndTime() {
-           event.playbackEnd.emit(data: .playedUntilEnd)
-           
-           if repeatMode == .track {
-               self.pause()
-               DispatchQueue.main.asyncAfter(deadline: .now() + 0.016 * 2) { [weak self] in self?.replay() }
-           } else {
-               let nextItem = queue.next(wrap: repeatMode == .queue)
-               if let nextItem = nextItem {
-                   super.load(item: nextItem)
-                   applyQuadraticFadeIn()
-                   hasCalledNext = false // Reset the flag
-               } else {
-                   wrapper.state = .ended
-               }
-           }
-       }
+        event.playbackEnd.emit(data: .playedUntilEnd)
+        
+        if repeatMode == .track {
+            self.pause()
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.016 * 2) { [weak self] in self?.replay() }
+        } else {
+            DispatchQueue.main.async { [weak self] in
+                guard let self = self else { return }
+                let nextItem = self.queue.next(wrap: self.repeatMode == .queue)
+                if let nextItem = nextItem {
+                    self.load(item: nextItem)
+                    self.play() // Ensure the next item starts playing
+                    self.hasCalledNext = false // Reset the flag
+                } else {
+                    self.wrapper.state = .ended
+                }
+            }
+        }
+    }
 
     // MARK: - QueueManagerDelegate
 
