@@ -30,7 +30,7 @@ public class QueuedAudioPlayer: AudioPlayer, QueueManagerDelegate {
     public override init(nowPlayingInfoController: NowPlayingInfoControllerProtocol = NowPlayingInfoController(), remoteCommandController: RemoteCommandController = RemoteCommandController()) {
         super.init(nowPlayingInfoController: nowPlayingInfoController, remoteCommandController: remoteCommandController)
         queue.delegate = self
-        addPeriodicTimeObserver()
+        //addPeriodicTimeObserver()
     }
 
     deinit {
