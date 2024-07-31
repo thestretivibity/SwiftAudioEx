@@ -30,7 +30,7 @@ public class QueuedAudioPlayer: AudioPlayer, QueueManagerDelegate {
     public override init(nowPlayingInfoController: NowPlayingInfoControllerProtocol = NowPlayingInfoController(), remoteCommandController: RemoteCommandController = RemoteCommandController()) {
         super.init(nowPlayingInfoController: nowPlayingInfoController, remoteCommandController: remoteCommandController)
         queue.delegate = self
-        //addPeriodicTimeObserver()
+        addPeriodicTimeObserver()
     }
 
     deinit {
@@ -327,7 +327,7 @@ public class QueuedAudioPlayer: AudioPlayer, QueueManagerDelegate {
         try! queue.jump(to: 0)
     }
 
-public func preloadNext(numberOfTracks: Int = 1) {
+public func preloadNext(numberOfTracks: Int = 10) {
     let nextItems = queue.nextItems
 
     for i in 0..<min(numberOfTracks, nextItems.count) {
