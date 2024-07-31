@@ -181,7 +181,7 @@ class AVPlayerWrapper: AVPlayerWrapperProtocol {
     
     var bufferDuration: TimeInterval = 0
 
-    var timeEventFrequency: TimeEventFrequency = .everyQuarterSecond {
+    var timeEventFrequency: TimeEventFrequency = .everySecond {
         didSet {
             playerTimeObserver.periodicObserverTimeInterval = timeEventFrequency.getTime()
         }
@@ -537,9 +537,7 @@ extension AVPlayerWrapper: AVPlayerItemNotificationObserverDelegate {
     }
     
     func itemDidPlayToEndTime() {
-        DispatchQueue.main.asyncAfter(deadline: .now()) { 
-            self.delegate?.AVWrapperItemDidPlayToEndTime()
-        }
+        delegate?.AVWrapperItemDidPlayToEndTime()
     }
     
 }
